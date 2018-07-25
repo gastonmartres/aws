@@ -118,7 +118,7 @@ if __name__ == "__main__":
             with_profile = True
             print "\n---=[ Connecting to AWS with profile %s ... ]=---" % (green(str(args.profile)))
             session = boto3.Session(profile_name=args.profile,region_name=args.region)
-            ecs_instances = config.get(args.profile,'ec2_instances').split(',')
+            ec2_instances = config.get(args.profile,'ec2_instances').split(',')
             rds_instances = config.get(args.profile,'rds_instances').split(',')
         except Exception, e:
             print "[Profile] - Error setting client connection: %s" % (red(str(e)))
@@ -158,6 +158,10 @@ if __name__ == "__main__":
             print response
 
     if args.start:
+        if with_profile:
+            client = session.client('rds')
+        else:
+            client = boto3.client('rds',region_name=args.region)
         for i in ec2_instances:
             print "Starting %s" % (green(i))
             response = client.start_instances(InstanceIds=[i])
@@ -176,6 +180,11 @@ if __name__ == "__main__":
                 
     if args.status:
         if args.all:
+            print bold("[EC2 Instances status]")
+            if with_profile:
+                client = session.client('ec2')
+            else:
+                client = boto3.client('ec2',region_name=args.region)
             status = client.describe_instances()
             for x in status['Reservations']:
                 for z in x['Instances']:
@@ -192,9 +201,25 @@ if __name__ == "__main__":
                         c_state = green(state)
                     if state in ('terminated'):
                         c_state = bold(purple(state))
-
                     print "Instance %s (%s) in state %s" % (bold(green(name)),yellow(instance),c_state)
+            print bold("[RDS Instances status]")
+            if with_profile:
+                client = session.client('rds')
+            else:
+                client = boto3.client('rds',region_name=args.region)
+            status = client.describe_db_instances()
+            for x in status['DBInstances']:
+                if x['DBInstanceStatus'] in ('available'):
+                    state = green(x['DBInstanceStatus'])
+                elif x['DBInstanceStatus'] in ('stopped','stopping'):
+                    state = bold(red(x['DBInstanceStatus']))
+                print "RDS Instance %s in state %s" % (green(x['DBInstanceIdentifier']),state)
         else:
+            print bold("[EC2 Instances status]")
+            if with_profile:
+                client = session.client('ec2')
+            else:
+                client = boto3.client('ec2',region_name=args.region)
             status = client.describe_instances(InstanceIds=ec2_instances)
             for x in status['Reservations']:
                 for z in x['Instances']:
@@ -204,3 +229,16 @@ if __name__ == "__main__":
                         if i['Key'] == 'Name':
                             name = i['Value']
                     print "Instance %s (%s) in state %s" % (green(name),yellow(instance),state)
+            print bold("[RDS Instances status]")
+            if with_profile:
+                client = session.client('rds')
+            else:
+                client = boto3.client('rds',region_name=args.region)
+            for i in rds_instances:
+                status = client.describe_db_instances(DBInstanceIdentifier=i)
+                for x in status['DBInstances']:
+                    if x['DBInstanceStatus'] in ('available'):
+                        state = green(x['DBInstanceStatus'])
+                    elif x['DBInstanceStatus'] in ('stopped','stopping'):
+                        state = bold(red(x['DBInstanceStatus']))
+                    print "RDS Instance %s in state %s" % (green(x['DBInstanceIdentifier']),state)
