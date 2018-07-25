@@ -1,0 +1,13 @@
+[ 
+    {
+        "Name": "/project/env/app/app_name", 
+        "Type": "String", 
+        "Value": "uat"
+    }, 
+    {
+        "KeyId": "alias/key/env", 
+        "Name": "/project/env/app/app_passwd", 
+        "Type": "SecureString", 
+        "Value": "asdf1234"
+    },
+]
