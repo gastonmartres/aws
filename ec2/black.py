@@ -152,16 +152,19 @@ if __name__ == "__main__":
             client = boto3.client('rds',region_name=args.region)
         for i in rds_instances:
             print "Shutting down %s" % (red(i))
-            response = client.stop_db_instance(
-                DBInstanceIdentifier=i
-            )
-            print response
+            try:
+                response = client.stop_db_instance(
+                    DBInstanceIdentifier=i
+                )
+                print response
+            except Exception, e:
+                print "RDS Instance %s already down." % (i)
 
     if args.start:
         if with_profile:
-            client = session.client('rds')
+            client = session.client('ec2')
         else:
-            client = boto3.client('rds',region_name=args.region)
+            client = boto3.client('ec2',region_name=args.region)
         for i in ec2_instances:
             print "Starting %s" % (green(i))
             response = client.start_instances(InstanceIds=[i])
@@ -177,6 +180,19 @@ if __name__ == "__main__":
                 else:
                     print yellow(name)
                     time.sleep(15)
+        if with_profile:
+            client = session.client('rds')
+        else:
+            client = boto3.client('rds',region_name=args.region)
+        for i in rds_instances:
+            print "Shutting down %s" % (red(i))
+            try:
+                response = client.start_db_instance(
+                    DBInstanceIdentifier=i
+                )
+                print response
+            except Exception, e:
+                print "RDS Instance %s already up." % (i)
                 
     if args.status:
         if args.all:
