@@ -1,6 +1,6 @@
 #!/usr/bin/python
 #  -*- coding: utf-8 -*-
-# Author: Gaston Martres <gastonmartres@gmail.com>
+# Author: Gaston Martres <gaston.martres@comafi.com.ar>
 
 import boto3
 import argparse
@@ -71,6 +71,7 @@ parser.add_argument('--profile',help="Set the profile to use when fetching or up
 parser.add_argument('--debug',help="Debug mode, TODO", action="store_true",default=False)
 parser.add_argument('--region',help='Sets the region from where to gather data. Defaults to us-east-1',default='us-east-1')
 parser.add_argument('--config', help='Specify the config file.',type=str,required=True)
+
 action = parser.add_mutually_exclusive_group(required=False)
 action.add_argument('--start',help='Start instances.',action='store_true',default=False)
 action.add_argument('--stop',help='Stop intances',action='store_true',default=False)
@@ -93,7 +94,6 @@ else:
     sys.exit(False)
 
 if __name__ == "__main__":
-    print args
     
     #Creamos el pointer a la conexion de AWS
     if args.profile ==  None:
@@ -132,19 +132,22 @@ if __name__ == "__main__":
             client = boto3.client('ec2',region_name=args.region)
         for i in ec2_instances:
             print "Shutting down %s" % (red(i))
-            response = client.stop_instances(InstanceIds=[i])
-            while True:
-                status = client.describe_instances(InstanceIds=[i])
-                for x in status['Reservations']:
-                    for z in x['Instances']:
-                        code = z['State']['Code']
-                        name = z['State']['Name']                            
-                if code == 80:
-                    print "Instance %s stopped." % (green(i))
-                    break
-                else:
-                    print yellow(name)
-                    time.sleep(15)
+            try:
+                response = client.stop_instances(InstanceIds=[i])
+                while True:
+                    status = client.describe_instances(InstanceIds=[i])
+                    for x in status['Reservations']:
+                        for z in x['Instances']:
+                            code = z['State']['Code']
+                            name = z['State']['Name']                            
+                    if code == 80:
+                        print "Instance %s stopped." % (green(i))
+                        break
+                    else:
+                        print yellow(name)
+                        time.sleep(15)
+            except Exception,e:
+                print "Error: %s" % (red(bold(e)))
         print "Shutting Down RDS instances:..."
         if with_profile:
             client = session.client('rds')
@@ -217,6 +220,7 @@ if __name__ == "__main__":
                         c_state = green(state)
                     if state in ('terminated'):
                         c_state = bold(purple(state))
+
                     print "Instance %s (%s) in state %s" % (bold(green(name)),yellow(instance),c_state)
             print bold("[RDS Instances status]")
             if with_profile:
@@ -244,7 +248,15 @@ if __name__ == "__main__":
                     for i in z['Tags']:
                         if i['Key'] == 'Name':
                             name = i['Value']
-                    print "Instance %s (%s) in state %s" % (green(name),yellow(instance),state)
+                    if state in ('shutting-down'):
+                        c_state = yellow(state)
+                    if state in ('stopped','stopping'):
+                        c_state = bold(red(state))
+                    if state in ('running'):
+                        c_state = green(state)
+                    if state in ('terminated'):
+                        c_state = bold(purple(state))
+                    print "Instance %s (%s) in state %s" % (bold(green(name)),yellow(instance),c_state)
             print bold("[RDS Instances status]")
             if with_profile:
                 client = session.client('rds')
