@@ -1,6 +1,6 @@
 #!/usr/bin/python
 #  -*- coding: utf-8 -*-
-# Author: Gaston Martres <gaston.martres@comafi.com.ar>
+# Author: Gaston Martres <gastonmartres@gmail.com>
 
 import boto3
 import argparse
