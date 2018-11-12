@@ -10,6 +10,7 @@ import sys
 import os
 import time
 import ConfigParser
+import textwrap
 
 locale.setlocale(locale.LC_ALL,'es_AR.UTF-8')
 
@@ -151,7 +152,8 @@ def checkInstanceStatus(instanceId,state):
         instance = i['InstanceId']
         state_name = i['InstanceState']['Name']
         code = i['InstanceState']['Code']
-        print "Instance: %s, State: %s (%s)" % (instance,state_name,code)
+        strout = "Instance: %s, State: %s (%s)" % (instance,state_name,code)
+        print repr(strout)
         if code == state:
             instance_to_check.remove(instance)
 
@@ -167,13 +169,16 @@ if __name__ == "__main__":
         try:
             client = session.client('ec2')
             response = client.describe_instances()
+            if show_status or verbose:
+                print "%s\t\t%s" % (bold("InstanceID"),bold("Status"))
             for i in range(len(response['Reservations'])):
                 for z in range(len(response['Reservations'][i]['Instances'])):
                     _instance = response['Reservations'][i]['Instances'][z]['InstanceId']
                     _state = response['Reservations'][i]['Instances'][z]['State']['Name']
                     # Muestro el status de las instancias.
                     if show_status or verbose:
-                        print bold(green(_instance)) + ", State: " + yellow(_state)
+                        fmt = "{i:s}\t{s:s}"
+                        print fmt.format(i=_instance,s=_state)
                     for x in response['Reservations'][i]['Instances'][z]['Tags']:
                         if x['Key'] == tag_key:
                             if x['Value'] in values_to_skip:
@@ -197,6 +202,8 @@ if __name__ == "__main__":
         try:
             client = session.client("rds")
             response = client.describe_db_instances()
+            if show_status or verbose:
+                print "%s\t\t%s\t\t\t%s" % (bold("DBName"),bold("ResourceID"),bold("Status"))
             for i in range(len(response['DBInstances'])):
                 _db_instance = response['DBInstances'][i]['DBInstanceIdentifier']
                 _db_resource_id = response['DBInstances'][i]['DbiResourceId']
@@ -204,7 +211,8 @@ if __name__ == "__main__":
                 _db_instance_arn = response['DBInstances'][i]['DBInstanceArn']
                 
                 if show_status or verbose:
-                    print _db_instance + " : " + _db_resource_id + " : " + _db_status
+                    fmt = "{db:s}\t{i:s}\t{s:s}"
+                    print fmt.format(db=_db_instance,i=_db_resource_id,s=_db_status)
                 
                 # Como AWS no pone los tags en describe_db_instance, hay que hacer una segunda llamada con el ARN de la DB.
                 tags = client.list_tags_for_resource(ResourceName=_db_instance_arn)
