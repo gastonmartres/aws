@@ -108,6 +108,10 @@ verbose = args.verbose
 instances = []
 rds_instances = []
 instance_to_check = []
+rds_instance_to_check = []
+debug = args.debug
+check_interval = float(config.get('general','check_interval'))
+
 
 def stopInstance(instanceId):
     print "Stopping %s" % (instanceId)
@@ -139,10 +143,24 @@ def startInstance(instanceId):
 
 def startRdsInstance(rdsInstanceId):
     print "Starting %s" % (rdsInstanceId)
+    c = session.client('rds')
+    response = c.start_db_instance(DBInstanceIdentifier=rdsInstanceId)
+    if response['DBInstance']['DBInstanceStatus'] != "available":
+        rds_instance_to_check.append(rdsInstanceId)
+        return True
+    else: 
+        return False
     time.sleep(1)
 
 def stopRdsInstance(rdsInstanceId):
     print "Stopping %s" % (rdsInstanceId)
+    c = session.client('rds')
+    response = c.stop_db_instance(DBInstanceIdentifier=rdsInstanceId)
+    if response['DBInstance']['DBInstanceStatus'] != "stopped":
+        rds_instance_to_check.append(rdsInstanceId)
+        return True
+    else: 
+        return False
     time.sleep(1)
 
 def checkInstanceStatus(instanceId,state):
@@ -152,10 +170,23 @@ def checkInstanceStatus(instanceId,state):
         instance = i['InstanceId']
         state_name = i['InstanceState']['Name']
         code = i['InstanceState']['Code']
-        strout = "Instance: %s, State: %s (%s)" % (instance,state_name,code)
-        print repr(strout)
+        if debug:
+            print "[DEBUG] - %s: %s" % (_db_instance,_db_status)
+        fmt = "{i:s}\t{s:s}"
+        print fmt.format(i=instance,s=state_name)
         if code == state:
             instance_to_check.remove(instance)
+
+def checkRdsInstanceStatus(rdsInstanceId,state):
+    c = session.client('rds')
+    response = c.describe_db_instances()
+    for i in range(len(response['DBInstances'])):
+        db_instance = response['DBInstances'][i]['DBInstanceIdentifier']
+        db_status = response['DBInstances'][i]['DBInstanceStatus']
+        fmt = "{i:s}\t{s:s}"
+        print fmt.format(i=db_instance,s=db_status)
+        if db_status == state:
+            rds_instance_to_check.remove(db_instance)
 
 if __name__ == "__main__":
     print "Using profile %s" % (bold(green(args.profile)))
@@ -281,10 +312,32 @@ if __name__ == "__main__":
             state = 16
             state_name = 'running'
         while True:
+            header = "%s\t\t%s" % (bold("Instance"),bold("Status"))
+            print header
+            checkInstanceStatus(instance_to_check,state)
             if len(instance_to_check) == 0:
                 print "[%s] - All instances %s" % (bold(yellow("INFO")),state_name)
-                sys.exit(0)
-            else: 
-                print "[%s] - Instances left: %i" % (bold(yellow("INFO")),len(instance_to_check))
-                checkInstanceStatus(instance_to_check,state)
-                time.sleep(10)
+                break
+            else:
+                print "[%s] - Instances left to check: %i" % (bold(yellow("INFO")),len(instance_to_check))
+            time.sleep(check_interval)
+    
+    if len(rds_instance_to_check) > 0:
+        if args.stop:
+            state = 'stopped'
+        if args.start:
+            state = 'available'
+        while True:
+            header = "%s\t%s" % (bold("RdsInstance"),bold("Status"))
+            print header
+            checkRdsInstanceStatus(rds_instance_to_check,state)
+            if debug:
+                print "[DEBUG] - len(rds_instances_to_check): %i" % (len(rds_instance_to_check))
+            if len(rds_instance_to_check) == 0:
+                print "[%s] - All instances %s" % (bold(yellow("INFO")),state)
+                break
+            else:
+                print "[%s] - Instances left to check: %i" % (bold(yellow("INFO")),len(rds_instance_to_check))
+            time.sleep(check_interval)
+
+    sys.exit(0)
