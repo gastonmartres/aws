@@ -319,7 +319,7 @@ if __name__ == "__main__":
                 print "[%s] - All instances %s" % (bold(yellow("INFO")),state_name)
                 break
             else:
-                print "[%s] - Instances left to check: %i" % (bold(yellow("INFO")),len(instance_to_check))
+                print "[%s] - Instances left to check: %i | Next check in %i seconds." % (bold(yellow("INFO")),len(instance_to_check),int(check_interval))
             time.sleep(check_interval)
     
     if len(rds_instance_to_check) > 0:
@@ -337,7 +337,7 @@ if __name__ == "__main__":
                 print "[%s] - All instances %s" % (bold(yellow("INFO")),state)
                 break
             else:
-                print "[%s] - Instances left to check: %i" % (bold(yellow("INFO")),len(rds_instance_to_check))
+                print "[%s] - RDS Instances left to check: %i | Next check in %i seconds." % (bold(yellow("INFO")),len(rds_instance_to_check),int(check_interval))
             time.sleep(check_interval)
 
     sys.exit(0)
