@@ -1,6 +1,11 @@
 #!/usr/bin/python
 #  -*- coding: utf-8 -*-
 # Author: Gaston Martres <gastonmartres@gmail.com>
+#
+# TODO: 
+# - Start/Stop por ambiente
+# - Chequeo de horario
+# - Lectura de tags correspondiente a como se ejecuta el ambiente (onDemand, officehours, onLine)
 
 import boto3
 import argparse
@@ -68,14 +73,15 @@ def bold(string):
 
 # Parser de parametros
 parser = argparse.ArgumentParser(description='A little helper to start or stop EC2 instances defined in config file for use in a scheduled way, such as cronjobs.')
-parser.add_argument('--profile',help="Set the profile to use when fetching or uploading parameters. \nIf no profile is provided, ENV variables and .aws/config is used by default.",default='default')
+parser.add_argument('--profile',help="Set the profile to use when fetching or uploading parameters.",required=True)
 parser.add_argument('--debug',help="Debug mode, TODO", action="store_true",default=False)
 parser.add_argument('--region',help='Sets the region from where to gather data. Defaults to us-east-1',default='us-east-1')
 parser.add_argument('--config', help='Specify the config file.',type=str,required=True)
 parser.add_argument('--skip-rds', help='Skip start/stop of RDS instances.', action='store_true',default=False)
 parser.add_argument('--skip-ec2', help='Skip start/stop of EC2 instances.', action='store_true',default=False)
 parser.add_argument('--verbose',help='Show more information.', action='store_true',default=False)
-action = parser.add_mutually_exclusive_group(required=False)
+parser.add_argument('--env', help='Target environment, ex: qa, dev, uat. The tag must exists.',choices=['dev','staging','qa','uat','preprod','prod'],default="None")
+action = parser.add_mutually_exclusive_group(required=True)
 action.add_argument('--start',help='Start instances.',action='store_true',default=False)
 action.add_argument('--stop',help='Stop intances',action='store_true',default=False)
 action.add_argument('--status',help='Shows instances status',action='store_true',default=False)
@@ -186,7 +192,10 @@ def checkRdsInstanceStatus(rdsInstanceId,state):
         fmt = "{i:s}\t{s:s}"
         print fmt.format(i=db_instance,s=db_status)
         if db_status == state:
-            rds_instance_to_check.remove(db_instance)
+            try: 
+                rds_instance_to_check.remove(db_instance)
+            except Exception,e:
+                print "Ups: %s" % (e)
 
 if __name__ == "__main__":
     print "Using profile %s" % (bold(green(args.profile)))
@@ -199,7 +208,10 @@ if __name__ == "__main__":
         print bold("[ Gathering information for EC2 instances ]")
         try:
             client = session.client('ec2')
-            response = client.describe_instances()
+            if args.env != "None":
+                response = client.describe_instances(Filters=[{"Name":"tag:Env","Values":[args.env]}])
+            else: 
+                response = client.describe_instances()
             if show_status or verbose:
                 print "%s\t\t%s" % (bold("InstanceID"),bold("Status"))
             for i in range(len(response['Reservations'])):
@@ -215,7 +227,7 @@ if __name__ == "__main__":
                             if x['Value'] in values_to_skip:
                                 continue
                             
-                            if x['Value'] == 'office':
+                            if x['Value'] == 'Office':
                                 if args.stop:
                                     if _state == 'running':
                                         instances.append(_instance)
@@ -232,7 +244,14 @@ if __name__ == "__main__":
         print bold("[ Gathering information for RDS Instances ]")
         try:
             client = session.client("rds")
+            '''
+            if args.env != "None":
+                response = client.describe_db_instances(Filters=[{"Name":"tag:Env","Values":[args.env]}])
+            else:
+                response = client.describe_db_instances()
+            '''
             response = client.describe_db_instances()
+            # print response
             if show_status or verbose:
                 print "%s\t\t%s\t\t\t%s" % (bold("DBName"),bold("ResourceID"),bold("Status"))
             for i in range(len(response['DBInstances'])):
@@ -241,26 +260,55 @@ if __name__ == "__main__":
                 _db_status = response['DBInstances'][i]['DBInstanceStatus']
                 _db_instance_arn = response['DBInstances'][i]['DBInstanceArn']
                 
-                if show_status or verbose:
-                    fmt = "{db:s}\t{i:s}\t{s:s}"
-                    print fmt.format(db=_db_instance,i=_db_resource_id,s=_db_status)
-                
                 # Como AWS no pone los tags en describe_db_instance, hay que hacer una segunda llamada con el ARN de la DB.
                 tags = client.list_tags_for_resource(ResourceName=_db_instance_arn)
-                for x in tags['TagList']:
-                    if x['Key'] == tag_key:
-                        
-                        if x['Value'] in values_to_skip:
+                if args.env != "None":
+                    _is_env = False
+                    for x in tags['TagList']:
+                        if x['Key'] == 'Env' and x['Value'] == args.env:
+                            _is_env = True
                             continue
+                        if _is_env:    
+                            for x in tags['TagList']:
+                                if x['Key'] == tag_key:
+                                    if x['Value'] in values_to_skip:
+                                        continue
+                                    if x['Value'] == 'Office':
+                                        if show_status or verbose:
+                                            fmt = "{db:s}\t{i:s}\t{s:s}"
+                                            print fmt.format(db=_db_instance,i=_db_resource_id,s=_db_status)
+                                        if args.stop:
+                                            if _db_status == 'available':
+                                                rds_instances.append(_db_instance)
+                                        if args.start:
+                                            if _db_status == 'stopped':
+                                                rds_instances.append(_db_instance)    
+                else:
+                    for x in tags['TagList']:
+                        if x['Key'] == tag_key:
+                            if x['Value'] in values_to_skip:
+                                continue
+                            if x['Value'] == 'Office':
+                                if show_status or verbose:
+                                    fmt = "{db:s}\t{i:s}\t{s:s}"
+                                    print fmt.format(db=_db_instance,i=_db_resource_id,s=_db_status)
+                                if args.stop:
+                                    if _db_status == 'available':
+                                        rds_instances.append(_db_instance)
+                                if args.start:
+                                    if _db_status == 'stopped':
+                                        rds_instances.append(_db_instance)    
+
+                # for x in tags['TagList']:
+                #     print "%s : %s" % (x['Key'], x['Value'])
+                #     if x['Key'] == tag_key:
+                #         if args.env != "None":
+                #             if x['Key'] == 'Env' and x['Value'] != args.env:
+                #                 continue
+                #         if x['Value'] in values_to_skip:
+                #             continue
                         
-                        if x['Value'] == 'office':
-                            if args.stop:
-                                if _db_status == 'available':
-                                    rds_instances.append(_db_instance)
-                            if args.start:
-                                if _db_status == 'stopped':
-                                    rds_instances.append(_db_instance)
-                    # print "%s : %s" % (x['Key'],x['Value'])
+                        
         except Exception,e:
             print "[%s] - %s" % (bold(red("ERROR")),e)
             sys.exit(1)
