@@ -80,7 +80,7 @@ parser.add_argument('--config', help='Specify the config file.',type=str,require
 parser.add_argument('--skip-rds', help='Skip start/stop of RDS instances.', action='store_true',default=False)
 parser.add_argument('--skip-ec2', help='Skip start/stop of EC2 instances.', action='store_true',default=False)
 parser.add_argument('--verbose',help='Show more information.', action='store_true',default=False)
-parser.add_argument('--env', help='Target environment, ex: qa, dev, uat. The tag must exists.',choices=['dev','staging','qa','uat','preprod','prod'],default="None")
+parser.add_argument('--env', help='Target environment, ex: qa, dev, uat. The tag must exists.',type=str,default="None")
 action = parser.add_mutually_exclusive_group(required=True)
 action.add_argument('--start',help='Start instances.',action='store_true',default=False)
 action.add_argument('--stop',help='Stop intances',action='store_true',default=False)
@@ -117,7 +117,7 @@ instance_to_check = []
 rds_instance_to_check = []
 debug = args.debug
 check_interval = float(config.get('general','check_interval'))
-
+args.env = args.env.strip()
 
 def stopInstance(instanceId):
     print "Stopping %s" % (instanceId)
@@ -181,6 +181,9 @@ def checkInstanceStatus(instanceId,state):
         fmt = "{i:s}\t{s:s}"
         print fmt.format(i=instance,s=state_name)
         if code == state:
+            instance_to_check.remove(instance)
+        if code == 48:
+            print "Ops: Instance Terminated. Autoscaling perhaps?"
             instance_to_check.remove(instance)
 
 def checkRdsInstanceStatus(rdsInstanceId,state):
