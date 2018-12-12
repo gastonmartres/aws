@@ -188,7 +188,7 @@ def checkInstanceStatus(instanceId,state):
 
 def checkRdsInstanceStatus(rdsInstanceId,state):
     c = session.client('rds')
-    response = c.describe_db_instances()
+    response = c.describe_db_instances(DBInstanceIdentifier=rdsInstanceId)
     for i in range(len(response['DBInstances'])):
         db_instance = response['DBInstances'][i]['DBInstanceIdentifier']
         db_status = response['DBInstances'][i]['DBInstanceStatus']
@@ -238,7 +238,7 @@ if __name__ == "__main__":
                                     if _state == 'stopped':
                                         instances.append(_instance)
         except Exception,e:
-            print "[%s] - %s" % (bold(red("ERROR")),e)
+            print "[%s] - %s (EC2)" % (bold(red("ERROR")),e)
             sys.exit(1)
 
     # Seccion para RDS
@@ -265,6 +265,7 @@ if __name__ == "__main__":
                 
                 # Como AWS no pone los tags en describe_db_instance, hay que hacer una segunda llamada con el ARN de la DB.
                 tags = client.list_tags_for_resource(ResourceName=_db_instance_arn)
+                
                 if args.env != "None":
                     _is_env = False
                     for x in tags['TagList']:
@@ -301,17 +302,6 @@ if __name__ == "__main__":
                                 if args.start:
                                     if _db_status == 'stopped':
                                         rds_instances.append(_db_instance)    
-
-                # for x in tags['TagList']:
-                #     print "%s : %s" % (x['Key'], x['Value'])
-                #     if x['Key'] == tag_key:
-                #         if args.env != "None":
-                #             if x['Key'] == 'Env' and x['Value'] != args.env:
-                #                 continue
-                #         if x['Value'] in values_to_skip:
-                #             continue
-                        
-                        
         except Exception,e:
             print "[%s] - %s" % (bold(red("ERROR")),e)
             sys.exit(1)
@@ -378,17 +368,18 @@ if __name__ == "__main__":
             state = 'stopped'
         if args.start:
             state = 'available'
-        while True:
+        while len(rds_instance_to_check) > 0:
             header = "%s\t%s" % (bold("RdsInstance"),bold("Status"))
             print header
-            checkRdsInstanceStatus(rds_instance_to_check,state)
-            if debug:
-                print "[DEBUG] - len(rds_instances_to_check): %i" % (len(rds_instance_to_check))
-            if len(rds_instance_to_check) == 0:
-                print "[%s] - All instances %s" % (bold(yellow("INFO")),state)
-                break
-            else:
-                print "[%s] - RDS Instances left to check: %i | Next check in %i seconds." % (bold(yellow("INFO")),len(rds_instance_to_check),int(check_interval))
+            for z in rds_instance_to_check:
+                checkRdsInstanceStatus(z,state)
+                if debug:
+                    print "[DEBUG] - len(rds_instances_to_check): %i" % (len(rds_instance_to_check))
+                if len(rds_instance_to_check) == 0:
+                    print "[%s] - All instances %s" % (bold(yellow("INFO")),state)
+                    break
+                else:
+                    print "[%s] - RDS Instances left to check: %i | Next check in %i seconds." % (bold(yellow("INFO")),len(rds_instance_to_check),int(check_interval))
             time.sleep(check_interval)
 
     sys.exit(0)
