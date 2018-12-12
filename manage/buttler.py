@@ -3,7 +3,6 @@
 # Author: Gaston Martres <gastonmartres@gmail.com>
 #
 # TODO: 
-# - Start/Stop por ambiente
 # - Chequeo de horario
 # - Lectura de tags correspondiente a como se ejecuta el ambiente (onDemand, officehours, onLine)
 
@@ -18,6 +17,25 @@ import ConfigParser
 import textwrap
 
 locale.setlocale(locale.LC_ALL,'es_AR.UTF-8')
+
+# Parser de parametros
+parser = argparse.ArgumentParser(description='A little helper to start or stop EC2 instances defined in config file for use in a scheduled way, such as cronjobs.')
+parser.add_argument('--profile',help="Set the profile to use when fetching or uploading parameters.",required=True)
+parser.add_argument('--debug',help="Debug mode, TODO", action="store_true",default=False)
+parser.add_argument('--region',help='Sets the region from where to gather data. Defaults to us-east-1',default='us-east-1')
+parser.add_argument('--config', help='Specify the config file.',type=str,required=True)
+parser.add_argument('--skip-rds', help='Skip start/stop of RDS instances.', action='store_true',default=False)
+parser.add_argument('--skip-ec2', help='Skip start/stop of EC2 instances.', action='store_true',default=False)
+parser.add_argument('--verbose',help='Show more information.', action='store_true',default=False)
+parser.add_argument('--env', help='Target environment, ex: qa, dev, uat. The tag must exists.',type=str,default="None")
+action = parser.add_mutually_exclusive_group(required=True)
+action.add_argument('--start',help='Start instances.',action='store_true',default=False)
+action.add_argument('--stop',help='Stop intances',action='store_true',default=False)
+action.add_argument('--status',help='Shows instances status',action='store_true',default=False)
+action.add_argument('--reserve',help='Reserve the specified environment.',action='store_true',default=False)
+action.add_argument('--free',help='Free the specified environment',action='store_true',default=False)
+
+args = parser.parse_args()
 
 #---[ Colores ]-----------------------------------------------------------------
 def black(string):
@@ -70,25 +88,6 @@ def bold(string):
     ENDC = '\033[0m'
     return HEADER + str(string) + ENDC
 
-
-# Parser de parametros
-parser = argparse.ArgumentParser(description='A little helper to start or stop EC2 instances defined in config file for use in a scheduled way, such as cronjobs.')
-parser.add_argument('--profile',help="Set the profile to use when fetching or uploading parameters.",required=True)
-parser.add_argument('--debug',help="Debug mode, TODO", action="store_true",default=False)
-parser.add_argument('--region',help='Sets the region from where to gather data. Defaults to us-east-1',default='us-east-1')
-parser.add_argument('--config', help='Specify the config file.',type=str,required=True)
-parser.add_argument('--skip-rds', help='Skip start/stop of RDS instances.', action='store_true',default=False)
-parser.add_argument('--skip-ec2', help='Skip start/stop of EC2 instances.', action='store_true',default=False)
-parser.add_argument('--verbose',help='Show more information.', action='store_true',default=False)
-parser.add_argument('--env', help='Target environment, ex: qa, dev, uat. The tag must exists.',type=str,default="None")
-action = parser.add_mutually_exclusive_group(required=True)
-action.add_argument('--start',help='Start instances.',action='store_true',default=False)
-action.add_argument('--stop',help='Stop intances',action='store_true',default=False)
-action.add_argument('--status',help='Shows instances status',action='store_true',default=False)
-
-# parser.add_argument('--all',help="Apply the action to all instances in the config file",action='store_true',default=False)
-args = parser.parse_args()
-
 # ---[ Chequeos]---
 # Archivo de configuracion
 if os.path.exists(args.config):
@@ -102,22 +101,6 @@ else:
     print "Configuration file missing, please create one."
     sys.exit(False)
 
-# Asignamos variables
-profile = args.profile
-aws_region = args.region
-aws_access_key = config.get(profile,'aws_access_key')
-aws_secret_key = config.get(profile,'aws_secret_key')
-tag_key = config.get('general','tag_key')
-values_to_skip = config.get('general','values_to_skip').split(",")
-show_status = args.status
-verbose = args.verbose
-instances = []
-rds_instances = []
-instance_to_check = []
-rds_instance_to_check = []
-debug = args.debug
-check_interval = float(config.get('general','check_interval'))
-args.env = args.env.strip()
 
 def stopInstance(instanceId):
     print "Stopping %s" % (instanceId)
@@ -200,7 +183,30 @@ def checkRdsInstanceStatus(rdsInstanceId,state):
             except Exception,e:
                 print "Ups: %s" % (e)
 
+def updateInstanceTag(instanceId,Tag,Value):
+    c = session.client('ec2')
+    response = c.create_tags(Resources=[instanceId],Tags=[{'Key':Tag,'Value':Value},],)
+    print response
+
 if __name__ == "__main__":
+    # Asignamos variables
+    profile = args.profile
+    aws_region = args.region
+    aws_access_key = config.get(profile,'aws_access_key')
+    aws_secret_key = config.get(profile,'aws_secret_key')
+    tag_runmode_key = config.get('general','tag_runmode_key')
+    tag_runmode_value = config.get('general','tag_runmode_value')
+    values_to_skip = config.get('general','values_to_skip').split(",")
+    show_status = args.status
+    verbose = args.verbose
+    instances = []
+    rds_instances = []
+    instance_to_check = []
+    rds_instance_to_check = []
+    debug = args.debug
+    check_interval = float(config.get('general','check_interval'))
+    args.env = args.env.strip()
+
     print "Using profile %s" % (bold(green(args.profile)))
     global session
     session = boto3.Session(aws_access_key_id=aws_access_key, aws_secret_access_key=aws_secret_key,region_name=aws_region)
@@ -226,11 +232,11 @@ if __name__ == "__main__":
                         fmt = "{i:s}\t{s:s}"
                         print fmt.format(i=_instance,s=_state)
                     for x in response['Reservations'][i]['Instances'][z]['Tags']:
-                        if x['Key'] == tag_key:
+                        if x['Key'] == tag_runmode_key:
                             if x['Value'] in values_to_skip:
                                 continue
                             
-                            if x['Value'] == 'Office':
+                            if x['Value'] == tag_runmode_value:
                                 if args.stop:
                                     if _state == 'running':
                                         instances.append(_instance)
@@ -274,10 +280,10 @@ if __name__ == "__main__":
                             continue
                         if _is_env:    
                             for x in tags['TagList']:
-                                if x['Key'] == tag_key:
+                                if x['Key'] == tag_runmode_key:
                                     if x['Value'] in values_to_skip:
                                         continue
-                                    if x['Value'] == 'Office':
+                                    if x['Value'] == tag_runmode_value:
                                         if show_status or verbose:
                                             fmt = "{db:s}\t{i:s}\t{s:s}"
                                             print fmt.format(db=_db_instance,i=_db_resource_id,s=_db_status)
@@ -289,10 +295,10 @@ if __name__ == "__main__":
                                                 rds_instances.append(_db_instance)    
                 else:
                     for x in tags['TagList']:
-                        if x['Key'] == tag_key:
+                        if x['Key'] == tag_runmode_key:
                             if x['Value'] in values_to_skip:
                                 continue
-                            if x['Value'] == 'Office':
+                            if x['Value'] == tag_runmode_value:
                                 if show_status or verbose:
                                     fmt = "{db:s}\t{i:s}\t{s:s}"
                                     print fmt.format(db=_db_instance,i=_db_resource_id,s=_db_status)
@@ -306,12 +312,17 @@ if __name__ == "__main__":
             print "[%s] - %s" % (bold(red("ERROR")),e)
             sys.exit(1)
 
+    if args.reserve:
+        if args.skip_ec2 or args.skip_rds:
+            print "ERROR, you cannot skip EC2 instances or RDS instances when you reserve an environment."
+            sys.exit(0)
+
     # Acciones
     if args.stop:
         if not args.skip_ec2:
             print bold("[ Stopping EC2 instances ]")
             if len(instances) < 1:
-                print("[%s] - There were no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_key)))
+                print("[%s] - There were no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
             else:
                 for i in instances:
                     if stopInstance(i):
@@ -321,7 +332,7 @@ if __name__ == "__main__":
         if not args.skip_rds:
             print bold("[ Stopping RDS instances ]")
             if len(rds_instances) < 1:
-                print("[%s] - There were no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_key)))
+                print("[%s] - There were no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
             else:
                 for i in rds_instances:
                     stopRdsInstance(i)
@@ -330,7 +341,7 @@ if __name__ == "__main__":
         if not args.skip_ec2:
             print bold("[ Starting EC2 instances ]")
             if len(instances) < 1:
-                print("[%s] - There were no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_key)))
+                print("[%s] - There were no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
             else:
                 for i in instances:
                     if startInstance(i):
@@ -340,7 +351,7 @@ if __name__ == "__main__":
         if not args.skip_rds:
             print bold("[ Starting RDS instances ]")
             if len(rds_instances) < 1:
-                print("[%s] - There were no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_key)))
+                print("[%s] - There were no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
             else:
                 for i in rds_instances:
                     startRdsInstance(i)
@@ -373,13 +384,14 @@ if __name__ == "__main__":
             print header
             for z in rds_instance_to_check:
                 checkRdsInstanceStatus(z,state)
-                if debug:
-                    print "[DEBUG] - len(rds_instances_to_check): %i" % (len(rds_instance_to_check))
-                if len(rds_instance_to_check) == 0:
-                    print "[%s] - All instances %s" % (bold(yellow("INFO")),state)
-                    break
-                else:
-                    print "[%s] - RDS Instances left to check: %i | Next check in %i seconds." % (bold(yellow("INFO")),len(rds_instance_to_check),int(check_interval))
+            
+            if debug:
+                print "[DEBUG] - len(rds_instances_to_check): %i" % (len(rds_instance_to_check))
+            if len(rds_instance_to_check) == 0:
+                print "[%s] - All instances %s" % (bold(yellow("INFO")),state)
+                break
+            else:
+                print "[%s] - RDS Instances left to check: %i | Next check in %i seconds." % (bold(yellow("INFO")),len(rds_instance_to_check),int(check_interval))
             time.sleep(check_interval)
 
     sys.exit(0)
