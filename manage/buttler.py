@@ -193,7 +193,7 @@ def updateInstanceTag(instanceId,Tag,Value):
 
 def updateRdsInstanceTag(rdsInstanceId,Tag,Value):
     c = session.client('rds')
-    response_put = c.add_tags_to_resource(ResourceName=rdsInstanceId,Tags=[{'Key':Tag,'Value':Value},],)
+    response = c.add_tags_to_resource(ResourceName=rdsInstanceId,Tags=[{'Key':Tag,'Value':Value},],)
     if response['ResponseMetadata']['HTTPStatusCode'] == 200:
         return True
     else:
