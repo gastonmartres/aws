@@ -186,7 +186,18 @@ def checkRdsInstanceStatus(rdsInstanceId,state):
 def updateInstanceTag(instanceId,Tag,Value):
     c = session.client('ec2')
     response = c.create_tags(Resources=[instanceId],Tags=[{'Key':Tag,'Value':Value},],)
-    print response
+    if response['ResponseMetadata']['HTTPStatusCode'] == 200:
+        return True
+    else:
+        return False
+
+def updateRdsInstanceTag(rdsInstanceId,Tag,Value):
+    c = session.client('rds')
+    response_put = c.add_tags_to_resource(ResourceName=rdsInstanceId,Tags=[{'Key':Tag,'Value':Value},],)
+    if response['ResponseMetadata']['HTTPStatusCode'] == 200:
+        return True
+    else:
+        return False
 
 if __name__ == "__main__":
     # Asignamos variables
@@ -218,20 +229,20 @@ if __name__ == "__main__":
         try:
             client = session.client('ec2')
             if args.env != "None":
-                response = client.describe_instances(Filters=[{"Name":"tag:Env","Values":[args.env]}])
+                response_i = client.describe_instances(Filters=[{"Name":"tag:Env","Values":[args.env]}])
             else: 
-                response = client.describe_instances()
+                response_i = client.describe_instances()
             if show_status or verbose:
                 print "%s\t\t%s" % (bold("InstanceID"),bold("Status"))
-            for i in range(len(response['Reservations'])):
-                for z in range(len(response['Reservations'][i]['Instances'])):
-                    _instance = response['Reservations'][i]['Instances'][z]['InstanceId']
-                    _state = response['Reservations'][i]['Instances'][z]['State']['Name']
+            for i in range(len(response_i['Reservations'])):
+                for z in range(len(response_i['Reservations'][i]['Instances'])):
+                    _instance = response_i['Reservations'][i]['Instances'][z]['InstanceId']
+                    _state = response_i['Reservations'][i]['Instances'][z]['State']['Name']
                     # Muestro el status de las instancias.
                     if show_status or verbose:
                         fmt = "{i:s}\t{s:s}"
                         print fmt.format(i=_instance,s=_state)
-                    for x in response['Reservations'][i]['Instances'][z]['Tags']:
+                    for x in response_i['Reservations'][i]['Instances'][z]['Tags']:
                         if x['Key'] == tag_runmode_key:
                             if x['Value'] in values_to_skip:
                                 continue
@@ -259,23 +270,25 @@ if __name__ == "__main__":
             else:
                 response = client.describe_db_instances()
             '''
-            response = client.describe_db_instances()
+            response_db = client.describe_db_instances()
             # print response
             if show_status or verbose:
                 print "%s\t\t%s\t\t\t%s" % (bold("DBName"),bold("ResourceID"),bold("Status"))
-            for i in range(len(response['DBInstances'])):
-                _db_instance = response['DBInstances'][i]['DBInstanceIdentifier']
-                _db_resource_id = response['DBInstances'][i]['DbiResourceId']
-                _db_status = response['DBInstances'][i]['DBInstanceStatus']
-                _db_instance_arn = response['DBInstances'][i]['DBInstanceArn']
+            for i in range(len(response_db['DBInstances'])):
+                _db_instance = response_db['DBInstances'][i]['DBInstanceIdentifier']
+                _db_resource_id = response_db['DBInstances'][i]['DbiResourceId']
+                _db_status = response_db['DBInstances'][i]['DBInstanceStatus']
+                _db_instance_arn = response_db['DBInstances'][i]['DBInstanceArn']
                 
                 # Como AWS no pone los tags en describe_db_instance, hay que hacer una segunda llamada con el ARN de la DB.
                 tags = client.list_tags_for_resource(ResourceName=_db_instance_arn)
                 
                 if args.env != "None":
+                    _db_env = []
                     _is_env = False
                     for x in tags['TagList']:
                         if x['Key'] == 'Env' and x['Value'] == args.env:
+                            _db_env.append(_db_instance_arn)
                             _is_env = True
                             continue
                         if _is_env:    
@@ -312,17 +325,70 @@ if __name__ == "__main__":
             print "[%s] - %s" % (bold(red("ERROR")),e)
             sys.exit(1)
 
+    # Reserva de ambientes
     if args.reserve:
+        r_error = False
         if args.skip_ec2 or args.skip_rds:
             print "ERROR, you cannot skip EC2 instances or RDS instances when you reserve an environment."
             sys.exit(0)
+        if args.env == "None":
+            print "ERROR, you cannot reserve ALL environments."
+            sys.exit(0)
+        # Instancias EC2
+        for i in range(len(response_i['Reservations'])):
+            for z in range(len(response_i['Reservations'][i]['Instances'])):
+                _instance = response_i['Reservations'][i]['Instances'][z]['InstanceId']
+                _state = response_i['Reservations'][i]['Instances'][z]['State']['Name']
+                if not updateInstanceTag(_instance,'RunMode','Reserved'):
+                    print "ERROR - something went wrong"
+                    r_error = True
+        
+        # Instancias RDS
+        for i in _db_env:
+            if not updateRdsInstanceTag(i,'RunMode','Reserved'):
+                r_error = True
+        
+        if r_error:
+            print "ERROR - Environment %s not properly reserved." % (bold(red(args.env)))
+            sys.exit(1)
+        else:
+            print "Environment %s properly reserved." % (bold(green(args.env)))
+            sys.exit(0)
+    
+    # Liberacion de ambiente.
+    if args.free:
+        f_error = False
+        if args.skip_ec2 or args.skip_rds:
+            print "ERROR, you cannot skip EC2 instances or RDS instances when you free an environment."
+            sys.exit(0)
+        if args.env == "None":
+            print "ERROR, you cannot free ALL environments."
+            sys.exit(0)
+        for i in range(len(response_i['Reservations'])):
+            for z in range(len(response_i['Reservations'][i]['Instances'])):
+                _instance = response_i['Reservations'][i]['Instances'][z]['InstanceId']
+                _state = response_i['Reservations'][i]['Instances'][z]['State']['Name']
+                if not updateInstanceTag(_instance,'RunMode','Office'):
+                    f_error = True
+        # Instancias RDS
+        for i in _db_env:
+            if not updateRdsInstanceTag(i,'RunMode','Office'):
+                r_error = True
 
-    # Acciones
+        if f_error:
+            print "ERROR - Environment %s not properly freed." % (bold(red(args.env)))
+            sys.exit(1)
+        else:
+            print "Environment %s properly freed." % (bold(green(args.env)))
+            sys.exit(0)
+
+    # [ Acciones ]
+    # Detenemos instancias EC2 y RDS
     if args.stop:
         if not args.skip_ec2:
             print bold("[ Stopping EC2 instances ]")
             if len(instances) < 1:
-                print("[%s] - There were no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
+                print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
             else:
                 for i in instances:
                     if stopInstance(i):
@@ -332,16 +398,17 @@ if __name__ == "__main__":
         if not args.skip_rds:
             print bold("[ Stopping RDS instances ]")
             if len(rds_instances) < 1:
-                print("[%s] - There were no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
+                print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
             else:
                 for i in rds_instances:
                     stopRdsInstance(i)
 
+    # Iniciamos instancias EC2 y RDS
     if args.start:
         if not args.skip_ec2:
             print bold("[ Starting EC2 instances ]")
             if len(instances) < 1:
-                print("[%s] - There were no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
+                print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
             else:
                 for i in instances:
                     if startInstance(i):
@@ -351,11 +418,12 @@ if __name__ == "__main__":
         if not args.skip_rds:
             print bold("[ Starting RDS instances ]")
             if len(rds_instances) < 1:
-                print("[%s] - There were no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
+                print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
             else:
                 for i in rds_instances:
                     startRdsInstance(i)
-           
+    
+    # Chequeamos el estado de las instancias
     if len(instance_to_check) > 0:
         if args.stop:
             state = 80
@@ -374,6 +442,7 @@ if __name__ == "__main__":
                 print "[%s] - Instances left to check: %i | Next check in %i seconds." % (bold(yellow("INFO")),len(instance_to_check),int(check_interval))
             time.sleep(check_interval)
     
+    # Chequeamos el estado de las RDS
     if len(rds_instance_to_check) > 0:
         if args.stop:
             state = 'stopped'
