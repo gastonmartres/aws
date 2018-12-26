@@ -216,7 +216,7 @@ if __name__ == "__main__":
     rds_instance_to_check = []
     debug = args.debug
     check_interval = float(config.get('general','check_interval'))
-    args.env = args.env.strip()
+    args.env = args.env.lower().strip()
 
     print "Using profile %s" % (bold(green(args.profile)))
     global session
@@ -264,12 +264,6 @@ if __name__ == "__main__":
         print bold("[ Gathering information for RDS Instances ]")
         try:
             client = session.client("rds")
-            '''
-            if args.env != "None":
-                response = client.describe_db_instances(Filters=[{"Name":"tag:Env","Values":[args.env]}])
-            else:
-                response = client.describe_db_instances()
-            '''
             response_db = client.describe_db_instances()
             # print response
             if show_status or verbose:
