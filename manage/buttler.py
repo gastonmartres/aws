@@ -27,7 +27,7 @@ parser.add_argument('--config', help='Specify the config file.',type=str,require
 parser.add_argument('--skip-rds', help='Skip start/stop of RDS instances.', action='store_true',default=False)
 parser.add_argument('--skip-ec2', help='Skip start/stop of EC2 instances.', action='store_true',default=False)
 parser.add_argument('--verbose',help='Show more information.', action='store_true',default=False)
-parser.add_argument('--env', help='Target environment, ex: qa, dev, uat. The tag must exists.',type=str,default="None")
+parser.add_argument('--env', help='Target environment, ex: all, qa, dev, uat. The tag must exists.',type=str,default="all")
 action = parser.add_mutually_exclusive_group(required=True)
 action.add_argument('--start',help='Start instances.',action='store_true',default=False)
 action.add_argument('--stop',help='Stop intances',action='store_true',default=False)
@@ -142,7 +142,7 @@ def startInstance(instanceId):
         else:
             return False
     except Exception,e:
-        printLog("ERROR",e)
+        printLog("ERROR",str(e))
         print("[%s] - %s" % (bold(red("ERROR")),e))
     time.sleep(1)
 
@@ -158,7 +158,7 @@ def startRdsInstance(rdsInstanceId):
         else:
             return False
     except Exception,e:
-        printLog("ERROR",e)
+        printLog("ERROR",str(e))
     time.sleep(1)
 
 def stopRdsInstance(rdsInstanceId):
@@ -173,7 +173,7 @@ def stopRdsInstance(rdsInstanceId):
         else: 
             return False
     except Exception,e:
-        printLog("ERROR",e)
+        printLog("ERROR",str(e))
     time.sleep(1)
 
 def checkInstanceStatus(instanceId,state):
@@ -194,7 +194,7 @@ def checkInstanceStatus(instanceId,state):
                 print "Ops: Instance Terminated. Autoscaling perhaps?"
                 instance_to_check.remove(instance)
     except Exception,e:
-        printLog("ERROR",e)
+        printLog("ERROR",str(e))
 
 
 def checkRdsInstanceStatus(rdsInstanceId,state):
@@ -245,6 +245,7 @@ if __name__ == "__main__":
     tag_runmode = config.get('general','tag_runmode')
     tag_runmode_value = config.get('general','tag_runmode_value')
     tag_runmode_reserved = config.get('general','tag_runmode_reserved')
+    tag_environment = config.get('general','tag_environment')
     values_to_skip = config.get('general','values_to_skip').split(",")
     show_status = args.status
     verbose = args.verbose
@@ -256,6 +257,7 @@ if __name__ == "__main__":
     check_interval = float(config.get('general','check_interval'))
     args.env = args.env.lower().strip()
 
+    printLog("INFO","Using profile %s" % (args.profile))
     print "Using profile %s" % (bold(green(args.profile)))
     global session
     session = boto3.Session(aws_access_key_id=aws_access_key, aws_secret_access_key=aws_secret_key,region_name=aws_region)
@@ -266,20 +268,22 @@ if __name__ == "__main__":
         print bold("[ Gathering information for EC2 instances ]")
         try:
             client = session.client('ec2')
-            if args.env != "None":
+            if args.env != "all":
                 response_i = client.describe_instances(Filters=[{"Name":"tag:Env","Values":[args.env]}])
-            else: 
+            elif args.env == "all": 
                 response_i = client.describe_instances()
-            if show_status or verbose:
+            if show_status:
                 print "%s\t\t%s" % (bold("InstanceID"),bold("Status"))
             for i in range(len(response_i['Reservations'])):
                 for z in range(len(response_i['Reservations'][i]['Instances'])):
                     _instance = response_i['Reservations'][i]['Instances'][z]['InstanceId']
                     _state = response_i['Reservations'][i]['Instances'][z]['State']['Name']
+                    
                     # Muestro el status de las instancias.
-                    if show_status or verbose:
+                    if show_status:
                         fmt = "{i:s}\t{s:s}"
                         print fmt.format(i=_instance,s=_state)
+
                     for x in response_i['Reservations'][i]['Instances'][z]['Tags']:
                         if x['Key'] == tag_runmode:
                             if x['Value'] in values_to_skip:
@@ -292,6 +296,9 @@ if __name__ == "__main__":
                                 if args.start:
                                     if _state == 'stopped':
                                         instances.append(_instance)
+                                
+                                
+
         except Exception,e:
             print "[%s] - %s (EC2)" % (bold(red("ERROR")),e)
             sys.exit(1)
@@ -304,7 +311,7 @@ if __name__ == "__main__":
             client = session.client("rds")
             response_db = client.describe_db_instances()
             # print response
-            if show_status or verbose:
+            if show_status:
                 print "%s\t\t%s\t\t\t%s" % (bold("DBName"),bold("ResourceID"),bold("Status"))
             for i in range(len(response_db['DBInstances'])):
                 _db_instance = response_db['DBInstances'][i]['DBInstanceIdentifier']
@@ -315,13 +322,16 @@ if __name__ == "__main__":
                 # Como AWS no pone los tags en describe_db_instance, hay que hacer una segunda llamada con el ARN de la DB.
                 tags = client.list_tags_for_resource(ResourceName=_db_instance_arn)
                 
-                if args.env != "None":
+                if args.env != "all":
                     _db_env = []
                     _is_env = False
+                    
                     for x in tags['TagList']:
-                        if x['Key'] == 'Env' and x['Value'] == args.env:
+                    
+                        if x['Key'] == tag_environment and x['Value'] == args.env:
                             _db_env.append(_db_instance_arn)
                             _is_env = True
+                        else: 
                             continue
                         if _is_env:    
                             for x in tags['TagList']:
@@ -329,7 +339,7 @@ if __name__ == "__main__":
                                     if x['Value'] in values_to_skip:
                                         continue
                                     if x['Value'] == tag_runmode_value:
-                                        if show_status or verbose:
+                                        if show_status:
                                             fmt = "{db:s}\t{i:s}\t{s:s}"
                                             print fmt.format(db=_db_instance,i=_db_resource_id,s=_db_status)
                                         if args.stop:
@@ -377,7 +387,7 @@ if __name__ == "__main__":
         
         # Instancias RDS
         for i in _db_env:
-            if not updateRdsInstanceTag(i,tag_runmode,'Reserved'):
+            if not updateRdsInstanceTag(i,tag_runmode,tag_runmode_reserved):
                 r_error = True
         
         if r_error:
