@@ -12,7 +12,7 @@ import json
 import locale
 import sys
 import os
-import time
+import time,datetime
 import ConfigParser
 import textwrap
 
@@ -101,6 +101,18 @@ else:
     print "Configuration file missing, please create one."
     sys.exit(False)
 
+def printLog(facility,msg):
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    string = '[' + now +'] - [' + facility + '] - ' + msg
+    try:
+        fp = open(config.get('general','log_file'),'a+')
+        fp.write(string + '\n')
+        if debug:
+            print string
+        fp.close()
+    except Exception,e:
+        print "Cannot open logfile: %s" % (red(e))
+        sys.exit(1)
 
 def stopInstance(instanceId):
     print "Stopping %s" % (instanceId)
@@ -109,10 +121,12 @@ def stopInstance(instanceId):
         response = c.stop_instances(InstanceIds=[instanceId])
         if response['StoppingInstances'][0]['CurrentState']['Code'] != '16':
             instance_to_check.append(instanceId)
+            printLog("INFO","Se agrega la instancia %s a la lista de chequeos" % (instanceId))
             return True
         else:
             return False
     except Exception,e:
+        printLog("ERROR",e)
         print("[%s] - %s" % (bold(red("ERROR")),e))
     time.sleep(1)
 
@@ -123,81 +137,104 @@ def startInstance(instanceId):
         response = c.start_instances(InstanceIds=[instanceId])
         if response['StartingInstances'][0]['CurrentState']['Code'] != '80':
             instance_to_check.append(instanceId)
+            printLog("INFO","Se agrega la instancia %s a la lista de chequeos" % (instanceId))
             return True
         else:
             return False
     except Exception,e:
+        printLog("ERROR",e)
         print("[%s] - %s" % (bold(red("ERROR")),e))
     time.sleep(1)
 
 def startRdsInstance(rdsInstanceId):
     print "Starting %s" % (rdsInstanceId)
-    c = session.client('rds')
-    response = c.start_db_instance(DBInstanceIdentifier=rdsInstanceId)
-    if response['DBInstance']['DBInstanceStatus'] != "available":
-        rds_instance_to_check.append(rdsInstanceId)
-        return True
-    else: 
-        return False
+    try:
+        c = session.client('rds')
+        response = c.start_db_instance(DBInstanceIdentifier=rdsInstanceId)
+        if response['DBInstance']['DBInstanceStatus'] != "available":
+            rds_instance_to_check.append(rdsInstanceId)
+            printLog("INFO","Se agrega la instancia RDS %s a la lista de chequeos" % (rdsInstanceId))
+            return True
+        else:
+            return False
+    except Exception,e:
+        printLog("ERROR",e)
     time.sleep(1)
 
 def stopRdsInstance(rdsInstanceId):
-    print "Stopping %s" % (rdsInstanceId)
-    c = session.client('rds')
-    response = c.stop_db_instance(DBInstanceIdentifier=rdsInstanceId)
-    if response['DBInstance']['DBInstanceStatus'] != "stopped":
-        rds_instance_to_check.append(rdsInstanceId)
-        return True
-    else: 
-        return False
+    try:
+        print "Stopping %s" % (rdsInstanceId)
+        c = session.client('rds')
+        response = c.stop_db_instance(DBInstanceIdentifier=rdsInstanceId)
+        if response['DBInstance']['DBInstanceStatus'] != "stopped":
+            rds_instance_to_check.append(rdsInstanceId)
+            printLog("INFO","Se agrega la instancia RDS %s a la lista de chequeos" % (rdsInstanceId))
+            return True
+        else: 
+            return False
+    except Exception,e:
+        printLog("ERROR",e)
     time.sleep(1)
 
 def checkInstanceStatus(instanceId,state):
-    c = session.client('ec2')
-    response = c.describe_instance_status(InstanceIds=instanceId,IncludeAllInstances=True)
-    for i in response['InstanceStatuses']:
-        instance = i['InstanceId']
-        state_name = i['InstanceState']['Name']
-        code = i['InstanceState']['Code']
-        if debug:
-            print "[DEBUG] - %s: %s" % (_db_instance,_db_status)
-        fmt = "{i:s}\t{s:s}"
-        print fmt.format(i=instance,s=state_name)
-        if code == state:
-            instance_to_check.remove(instance)
-        if code == 48:
-            print "Ops: Instance Terminated. Autoscaling perhaps?"
-            instance_to_check.remove(instance)
+    try:
+        c = session.client('ec2')
+        response = c.describe_instance_status(InstanceIds=instanceId,IncludeAllInstances=True)
+        for i in response['InstanceStatuses']:
+            instance = i['InstanceId']
+            state_name = i['InstanceState']['Name']
+            code = i['InstanceState']['Code']
+            if debug:
+                print "[DEBUG] - %s: %s" % (_db_instance,_db_status)
+            fmt = "{i:s}\t{s:s}"
+            print fmt.format(i=instance,s=state_name)
+            if code == state:
+                instance_to_check.remove(instance)
+            if code == 48:
+                print "Ops: Instance Terminated. Autoscaling perhaps?"
+                instance_to_check.remove(instance)
+    except Exception,e:
+        printLog("ERROR",e)
+
 
 def checkRdsInstanceStatus(rdsInstanceId,state):
-    c = session.client('rds')
-    response = c.describe_db_instances(DBInstanceIdentifier=rdsInstanceId)
-    for i in range(len(response['DBInstances'])):
-        db_instance = response['DBInstances'][i]['DBInstanceIdentifier']
-        db_status = response['DBInstances'][i]['DBInstanceStatus']
-        fmt = "{i:s}\t{s:s}"
-        print fmt.format(i=db_instance,s=db_status)
-        if db_status == state:
-            try: 
-                rds_instance_to_check.remove(db_instance)
-            except Exception,e:
-                print "Ups: %s" % (e)
+    try:
+        c = session.client('rds')
+        response = c.describe_db_instances(DBInstanceIdentifier=rdsInstanceId)
+        for i in range(len(response['DBInstances'])):
+            db_instance = response['DBInstances'][i]['DBInstanceIdentifier']
+            db_status = response['DBInstances'][i]['DBInstanceStatus']
+            fmt = "{i:s}\t{s:s}"
+            print fmt.format(i=db_instance,s=db_status)
+            if db_status == state:
+                try: 
+                    rds_instance_to_check.remove(db_instance)
+                except Exception,e:
+                    print "Ups: %s" % (e)
+    except Exception,e:
+        printLog("ERROR",e)
 
 def updateInstanceTag(instanceId,Tag,Value):
-    c = session.client('ec2')
-    response = c.create_tags(Resources=[instanceId],Tags=[{'Key':Tag,'Value':Value},],)
-    if response['ResponseMetadata']['HTTPStatusCode'] == 200:
-        return True
-    else:
-        return False
+    try:
+        c = session.client('ec2')
+        response = c.create_tags(Resources=[instanceId],Tags=[{'Key':Tag,'Value':Value},],)
+        if response['ResponseMetadata']['HTTPStatusCode'] == 200:
+            return True
+        else:
+            return False
+    except Exception,e:
+        printLog("ERROR",e)
 
 def updateRdsInstanceTag(rdsInstanceId,Tag,Value):
-    c = session.client('rds')
-    response = c.add_tags_to_resource(ResourceName=rdsInstanceId,Tags=[{'Key':Tag,'Value':Value},],)
-    if response['ResponseMetadata']['HTTPStatusCode'] == 200:
-        return True
-    else:
-        return False
+    try:
+        c = session.client('rds')
+        response = c.add_tags_to_resource(ResourceName=rdsInstanceId,Tags=[{'Key':Tag,'Value':Value},],)
+        if response['ResponseMetadata']['HTTPStatusCode'] == 200:
+            return True
+        else:
+            return False
+    except Exception,e:
+        printLog("ERROR",e)
 
 if __name__ == "__main__":
     # Asignamos variables
@@ -205,8 +242,9 @@ if __name__ == "__main__":
     aws_region = args.region
     aws_access_key = config.get(profile,'aws_access_key')
     aws_secret_key = config.get(profile,'aws_secret_key')
-    tag_runmode_key = config.get('general','tag_runmode_key')
+    tag_runmode = config.get('general','tag_runmode')
     tag_runmode_value = config.get('general','tag_runmode_value')
+    tag_runmode_reserved = config.get('general','tag_runmode_reserved')
     values_to_skip = config.get('general','values_to_skip').split(",")
     show_status = args.status
     verbose = args.verbose
@@ -243,7 +281,7 @@ if __name__ == "__main__":
                         fmt = "{i:s}\t{s:s}"
                         print fmt.format(i=_instance,s=_state)
                     for x in response_i['Reservations'][i]['Instances'][z]['Tags']:
-                        if x['Key'] == tag_runmode_key:
+                        if x['Key'] == tag_runmode:
                             if x['Value'] in values_to_skip:
                                 continue
                             
@@ -287,7 +325,7 @@ if __name__ == "__main__":
                             continue
                         if _is_env:    
                             for x in tags['TagList']:
-                                if x['Key'] == tag_runmode_key:
+                                if x['Key'] == tag_runmode:
                                     if x['Value'] in values_to_skip:
                                         continue
                                     if x['Value'] == tag_runmode_value:
@@ -302,7 +340,7 @@ if __name__ == "__main__":
                                                 rds_instances.append(_db_instance)    
                 else:
                     for x in tags['TagList']:
-                        if x['Key'] == tag_runmode_key:
+                        if x['Key'] == tag_runmode:
                             if x['Value'] in values_to_skip:
                                 continue
                             if x['Value'] == tag_runmode_value:
@@ -333,13 +371,13 @@ if __name__ == "__main__":
             for z in range(len(response_i['Reservations'][i]['Instances'])):
                 _instance = response_i['Reservations'][i]['Instances'][z]['InstanceId']
                 _state = response_i['Reservations'][i]['Instances'][z]['State']['Name']
-                if not updateInstanceTag(_instance,'RunMode','Reserved'):
+                if not updateInstanceTag(_instance,tag_runmode,tag_runmode_reserved):
                     print "ERROR - something went wrong"
                     r_error = True
         
         # Instancias RDS
         for i in _db_env:
-            if not updateRdsInstanceTag(i,'RunMode','Reserved'):
+            if not updateRdsInstanceTag(i,tag_runmode,'Reserved'):
                 r_error = True
         
         if r_error:
@@ -362,17 +400,19 @@ if __name__ == "__main__":
             for z in range(len(response_i['Reservations'][i]['Instances'])):
                 _instance = response_i['Reservations'][i]['Instances'][z]['InstanceId']
                 _state = response_i['Reservations'][i]['Instances'][z]['State']['Name']
-                if not updateInstanceTag(_instance,'RunMode','Office'):
+                if not updateInstanceTag(_instance,tag_runmode,tag_runmode_value):
                     f_error = True
         # Instancias RDS
         for i in _db_env:
-            if not updateRdsInstanceTag(i,'RunMode','Office'):
+            if not updateRdsInstanceTag(i,tag_runmode,tag_runmode_value):
                 r_error = True
 
         if f_error:
+            printLog("ERROR","Environment %s not properly freed." % (args.env))
             print "ERROR - Environment %s not properly freed." % (bold(red(args.env)))
             sys.exit(1)
         else:
+            printLog("ERROR","Environment %s properly freed." % (args.env))
             print "Environment %s properly freed." % (bold(green(args.env)))
             sys.exit(0)
 
@@ -382,7 +422,7 @@ if __name__ == "__main__":
         if not args.skip_ec2:
             print bold("[ Stopping EC2 instances ]")
             if len(instances) < 1:
-                print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
+                print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode)))
             else:
                 for i in instances:
                     if stopInstance(i):
@@ -392,7 +432,7 @@ if __name__ == "__main__":
         if not args.skip_rds:
             print bold("[ Stopping RDS instances ]")
             if len(rds_instances) < 1:
-                print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
+                print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode)))
             else:
                 for i in rds_instances:
                     stopRdsInstance(i)
@@ -402,7 +442,7 @@ if __name__ == "__main__":
         if not args.skip_ec2:
             print bold("[ Starting EC2 instances ]")
             if len(instances) < 1:
-                print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
+                print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode)))
             else:
                 for i in instances:
                     if startInstance(i):
@@ -412,7 +452,7 @@ if __name__ == "__main__":
         if not args.skip_rds:
             print bold("[ Starting RDS instances ]")
             if len(rds_instances) < 1:
-                print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode_key)))
+                print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode)))
             else:
                 for i in rds_instances:
                     startRdsInstance(i)
