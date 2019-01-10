@@ -19,7 +19,7 @@ import textwrap
 locale.setlocale(locale.LC_ALL,'es_AR.UTF-8')
 
 # Parser de parametros
-parser = argparse.ArgumentParser(description='A little helper to start or stop EC2 instances defined in config file for use in a scheduled way, such as cronjobs.')
+parser = argparse.ArgumentParser(description='A little script which will help you start or stop EC2 instances and/or RDS instances.')
 parser.add_argument('--profile',help="Set the profile to use when fetching or uploading parameters.",required=True)
 parser.add_argument('--debug',help="Debug mode, TODO", action="store_true",default=False)
 parser.add_argument('--region',help='Sets the region from where to gather data. Defaults to us-east-1',default='us-east-1')
@@ -185,7 +185,7 @@ def checkInstanceStatus(instanceId,state):
             state_name = i['InstanceState']['Name']
             code = i['InstanceState']['Code']
             if debug:
-                print "[DEBUG] - %s: %s" % (_db_instance,_db_status)
+                print "[DEBUG] - %s: %s" % (instance,state_name)
             fmt = "{i:s}\t{s:s}"
             print fmt.format(i=instance,s=state_name)
             if code == state:
@@ -269,7 +269,7 @@ if __name__ == "__main__":
         try:
             client = session.client('ec2')
             if args.env != "all":
-                response_i = client.describe_instances(Filters=[{"Name":"tag:Env","Values":[args.env]}])
+                response_i = client.describe_instances(Filters=[{"Name":"tag:env","Values":[args.env]}])
             elif args.env == "all": 
                 response_i = client.describe_instances()
             if show_status:
