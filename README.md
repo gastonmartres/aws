@@ -36,6 +36,7 @@ optional arguments:
   --status           Shows instances status
   --reserve          Reserve the specified environment.
   --free             Free the specified environment
+  --nocolor          Supress colors on output
   ```
 
 ## ssm/menu_parameters.py
