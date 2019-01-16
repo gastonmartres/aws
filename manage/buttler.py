@@ -4,7 +4,9 @@
 #
 # TODO: 
 # - Chequeo de horario
-# - Lectura de tags correspondiente a como se ejecuta el ambiente (onDemand, officehours, onLine)
+# - Lectura de tags correspondiente al orden de inicio
+# - Lectura de tags correspondiente al proyecto
+# - Opcion de iniciar la DB primero y si tiene exito, continuar con las instancias.
 
 import boto3
 import argparse
@@ -26,15 +28,17 @@ parser.add_argument('--region',help='Sets the region from where to gather data. 
 parser.add_argument('--config', help='Specify the config file.',type=str,required=True)
 parser.add_argument('--skip-rds', help='Skip start/stop of RDS instances.', action='store_true',default=False)
 parser.add_argument('--skip-ec2', help='Skip start/stop of EC2 instances.', action='store_true',default=False)
-parser.add_argument('--verbose',help='Show more information.', action='store_true',default=False)
 parser.add_argument('--env', help='Target environment, ex: all, qa, dev, uat. The tag must exists.',type=str,default="all")
 parser.add_argument('--nocolor',help='Supress colors on output',action='store_true',default=False)
-action = parser.add_mutually_exclusive_group(required=True)
+action = parser.add_mutually_exclusive_group(required=False)
 action.add_argument('--start',help='Start instances.',action='store_true',default=False)
 action.add_argument('--stop',help='Stop intances',action='store_true',default=False)
-action.add_argument('--status',help='Shows instances status',action='store_true',default=False)
 action.add_argument('--reserve',help='Reserve the specified environment.',action='store_true',default=False)
 action.add_argument('--free',help='Free the specified environment',action='store_true',default=False)
+info = parser.add_mutually_exclusive_group(required=False)
+info.add_argument('--verbose',help='Increment output verbosity.',action='store_true',default=False)
+info.add_argument('--quiet',help='Quiet output. Only errors are shown.',action='store_true',default=False)
+info.add_argument('--status',help='Shows instances status',action='store_true',default=False)
 
 args = parser.parse_args()
 
@@ -116,7 +120,8 @@ def printLog(facility,msg):
         sys.exit(1)
 
 def stopInstance(instanceId):
-    print "Stopping %s" % (instanceId)
+    if not quiet:
+        print "Stopping %s" % (instanceId)
     try:
         c = session.client('ec2')
         response = c.stop_instances(InstanceIds=[instanceId])
@@ -135,7 +140,8 @@ def stopInstance(instanceId):
     time.sleep(1)
 
 def startInstance(instanceId):
-    print "Starting %s" % (instanceId)
+    if not quiet:
+        print "Starting %s" % (instanceId)
     try:
         c = session.client('ec2')
         response = c.start_instances(InstanceIds=[instanceId])
@@ -154,7 +160,8 @@ def startInstance(instanceId):
     time.sleep(1)
 
 def startRdsInstance(rdsInstanceId):
-    print "Starting %s" % (rdsInstanceId)
+    if not quiet:
+        print "Starting %s" % (rdsInstanceId)
     try:
         c = session.client('rds')
         response = c.start_db_instance(DBInstanceIdentifier=rdsInstanceId)
@@ -170,7 +177,8 @@ def startRdsInstance(rdsInstanceId):
 
 def stopRdsInstance(rdsInstanceId):
     try:
-        print "Stopping %s" % (rdsInstanceId)
+        if not quiet:
+            print "Stopping %s" % (rdsInstanceId)
         c = session.client('rds')
         response = c.stop_db_instance(DBInstanceIdentifier=rdsInstanceId)
         if response['DBInstance']['DBInstanceStatus'] != "stopped":
@@ -194,7 +202,8 @@ def checkInstanceStatus(instanceId,state):
             if debug:
                 print "[DEBUG] - %s: %s" % (instance,state_name)
             fmt = "{i:s}\t{s:s}"
-            print fmt.format(i=instance,s=state_name)
+            if not quiet:
+                print fmt.format(i=instance,s=state_name)
             if code == state:
                 instance_to_check.remove(instance)
             if code == 48:
@@ -212,7 +221,8 @@ def checkRdsInstanceStatus(rdsInstanceId,state):
             db_instance = response['DBInstances'][i]['DBInstanceIdentifier']
             db_status = response['DBInstances'][i]['DBInstanceStatus']
             fmt = "{i:s}\t{s:s}"
-            print fmt.format(i=db_instance,s=db_status)
+            if not quiet:
+                print fmt.format(i=db_instance,s=db_status)
             if db_status == state:
                 try: 
                     rds_instance_to_check.remove(db_instance)
@@ -264,28 +274,32 @@ if __name__ == "__main__":
     check_interval = float(config.get('general','check_interval'))
     args.env = args.env.lower().strip()
     nocolor = args.nocolor
+    quiet = args.quiet
 
     printLog("INFO","Using profile %s" % (args.profile))
-    if nocolor:
-        print "Using profile %s" % (args.profile)
-    else:
-        print "Using profile %s" % (bold(green(args.profile)))
+    if not quiet:
+        if nocolor:
+            print "Using profile %s" % (args.profile)
+        else:
+            print "Using profile %s" % (bold(green(args.profile)))
     global session
     session = boto3.Session(aws_access_key_id=aws_access_key, aws_secret_access_key=aws_secret_key,region_name=aws_region)
     
     # Seccion instancias EC2
     if not args.skip_ec2:
         # Instancias EC2
-        if nocolor:
-            print "[ Gathering information for EC2 instances ]"
-        else:
-            print bold("[ Gathering information for EC2 instances ]")
+        if not quiet:
+            if nocolor:
+                print "[ Gathering information for EC2 instances ]"
+            else:
+                print bold("[ Gathering information for EC2 instances ]")
         try:
             client = session.client('ec2')
             if args.env != "all":
                 response_i = client.describe_instances(Filters=[{"Name":"tag:env","Values":[args.env]}])
             elif args.env == "all": 
                 response_i = client.describe_instances()
+            # show status, no aplica --quiet
             if show_status:
                 if nocolor:
                     print "%s\t\t%s" % ("InstanceID","Status")
@@ -326,10 +340,11 @@ if __name__ == "__main__":
     # Seccion para RDS
     if not args.skip_rds:
         # Instancias RDS
-        if nocolor:
-            print "[ Gathering information for RDS Instances ]"
-        else:
-            print bold("[ Gathering information for RDS Instances ]")
+        if not quiet:
+            if nocolor:
+                print "[ Gathering information for RDS Instances ]"
+            else:
+                print bold("[ Gathering information for RDS Instances ]")
         try:
             client = session.client("rds")
             response_db = client.describe_db_instances()
@@ -420,16 +435,18 @@ if __name__ == "__main__":
                 r_error = True
         
         if r_error:
-            if nocolor:
-                print "ERROR - Environment %s not properly reserved." % (args.env)
-            else:
-                print "ERROR - Environment %s not properly reserved." % (bold(red(args.env)))
+            if not quiet:
+                if nocolor:
+                    print "ERROR - Environment %s not properly reserved." % (args.env)
+                else:
+                    print "ERROR - Environment %s not properly reserved." % (bold(red(args.env)))
             sys.exit(1)
         else:
-            if nocolor:
-                print "Environment %s properly reserved." % (args.env)
-            else:
-                print "Environment %s properly reserved." % (bold(green(args.env)))
+            if not quiet:
+                if nocolor:
+                    print "Environment %s properly reserved." % (args.env)
+                else:
+                    print "Environment %s properly reserved." % (bold(green(args.env)))
             sys.exit(0)
     
     # Liberacion de ambiente.
@@ -454,48 +471,56 @@ if __name__ == "__main__":
 
         if f_error:
             printLog("ERROR","Environment %s not properly freed." % (args.env))
-            if nocolor:
-                print "ERROR - Environment %s not properly freed." % (args.env)
-            else:
-                print "ERROR - Environment %s not properly freed." % (bold(red(args.env)))
+            if not quiet:
+                if nocolor:
+                    print "ERROR - Environment %s not properly freed." % (args.env)
+                else:
+                    print "ERROR - Environment %s not properly freed." % (bold(red(args.env)))
             sys.exit(1)
         else:
             printLog("ERROR","Environment %s properly freed." % (args.env))
-            if nocolor:
-                print "Environment %s properly freed." % (args.env)
-            else:
-                print "Environment %s properly freed." % (bold(green(args.env)))
+            if not quiet:
+                if nocolor:
+                    print "Environment %s properly freed." % (args.env)
+                else:
+                    print "Environment %s properly freed." % (bold(green(args.env)))
             sys.exit(0)
 
     # [ Acciones ]
     # Detenemos instancias EC2 y RDS
     if args.stop:
         if not args.skip_ec2:
-            if nocolor:
-                print "[ Stopping EC2 instances ]"
-            else:
-                print bold("[ Stopping EC2 instances ]")
-            if len(instances) < 1:
+            if not quiet:
                 if nocolor:
-                    print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % ("WARNING",tag_runmode))
+                    print "[ Stopping EC2 instances ]"
                 else:
-                    print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode)))
+                    print bold("[ Stopping EC2 instances ]")
+            if len(instances) < 1:
+                if not quiet:
+                    if nocolor:
+                        print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % ("WARNING",tag_runmode))
+                    else:
+                        print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode)))
             else:
                 for i in instances:
                     if stopInstance(i):
-                        print "Command sent succesfuly"
+                        if not quiet:
+                            print "Command sent succesfuly"
                     else:
-                        print "Something went wrong..."
+                        if not quiet:
+                            print "Something went wrong..."
         if not args.skip_rds:
-            if nocolor:
-                print "[ Stopping RDS instances ]"
-            else:
-                print bold("[ Stopping RDS instances ]")
-            if len(rds_instances) < 1:
+            if not quiet:
                 if nocolor:
-                    print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % ("WARNING",tag_runmode))
+                    print "[ Stopping RDS instances ]"
                 else:
-                    print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode)))
+                    print bold("[ Stopping RDS instances ]")
+            if len(rds_instances) < 1:
+                if not quiet:
+                    if nocolor:
+                        print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % ("WARNING",tag_runmode))
+                    else:
+                        print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode)))
             else:
                 for i in rds_instances:
                     stopRdsInstance(i)
@@ -503,32 +528,38 @@ if __name__ == "__main__":
     # Iniciamos instancias EC2 y RDS
     if args.start:
         if not args.skip_ec2:
-            if nocolor:
-                print "[ Starting EC2 instances ]"
-            else:
-                print bold("[ Starting EC2 instances ]")
+            if not quiet:
+                if nocolor:
+                    print "[ Starting EC2 instances ]"
+                else:
+                    print bold("[ Starting EC2 instances ]")
 
             if len(instances) < 1:
-                if nocolor:
-                    print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % ("WARNING",tag_runmode))
-                else:
-                    print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode)))
+                if not quiet:
+                    if nocolor:
+                        print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % ("WARNING",tag_runmode))
+                    else:
+                        print("[%s] - There are no EC2 instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode)))
             else:
                 for i in instances:
                     if startInstance(i):
-                        print "Command sent succesfuly"
+                        if not quiet:
+                            print "Command sent succesfuly"
                     else:
-                        print "Something went wrong..."
+                        if not quiet:
+                            print "Something went wrong..."
         if not args.skip_rds:
-            if nocolor:
-                print "[ Starting RDS instances ]"
-            else:
-                print bold("[ Starting RDS instances ]")
-            if len(rds_instances) < 1:
+            if not quiet:
                 if nocolor:
-                    print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % ("WARNING",tag_runmode))
+                    print "[ Starting RDS instances ]"
                 else:
-                    print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode)))
+                    print bold("[ Starting RDS instances ]")
+            if len(rds_instances) < 1:
+                if not quiet:
+                    if nocolor:
+                        print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % ("WARNING",tag_runmode))
+                    else:
+                        print("[%s] - There are no RDS instances with the tag %s available. None will be started/stopped." % (bold(red("WARNING")),yellow(tag_runmode)))
             else:
                 for i in rds_instances:
                     startRdsInstance(i)
@@ -542,23 +573,26 @@ if __name__ == "__main__":
             state = 16
             state_name = 'running'
         while True:
-            if nocolor:
-                header = "%s\t\t%s" % ("Instance","Status")
-            else:
-                header = "%s\t\t%s" % (bold("Instance"),bold("Status"))
-            print header
+            if not quiet:
+                if nocolor:
+                    header = "%s\t\t%s" % ("Instance","Status")
+                else:
+                    header = "%s\t\t%s" % (bold("Instance"),bold("Status"))
+                print header
             checkInstanceStatus(instance_to_check,state)
             if len(instance_to_check) == 0:
-                if nocolor:
-                    print "[%s] - All instances %s" % ("INFO",state_name)
-                else:
-                    print "[%s] - All instances %s" % (bold(yellow("INFO")),state_name)
+                if not quiet:
+                    if nocolor:
+                        print "[%s] - All instances %s" % ("INFO",state_name)
+                    else:
+                        print "[%s] - All instances %s" % (bold(yellow("INFO")),state_name)
                 break
             else:
-                if nocolor:
-                    print "[%s] - Instances left to check: %i | Next check in %i seconds." % ("INFO",len(instance_to_check),int(check_interval))
-                else:
-                    print "[%s] - Instances left to check: %i | Next check in %i seconds." % (bold(yellow("INFO")),len(instance_to_check),int(check_interval))
+                if not quiet:
+                    if nocolor:
+                        print "[%s] - Instances left to check: %i | Next check in %i seconds." % ("INFO",len(instance_to_check),int(check_interval))
+                    else:
+                        print "[%s] - Instances left to check: %i | Next check in %i seconds." % (bold(yellow("INFO")),len(instance_to_check),int(check_interval))
             time.sleep(check_interval)
     
     # Chequeamos el estado de las RDS
@@ -568,27 +602,30 @@ if __name__ == "__main__":
         if args.start:
             state = 'available'
         while len(rds_instance_to_check) > 0:
-            if nocolor:
-                header = "%s\t%s" % ("RdsInstance","Status")
-            else:
-                header = "%s\t%s" % (bold("RdsInstance"),bold("Status"))
-            print header
+            if not quiet:
+                if nocolor:
+                    header = "%s\t%s" % ("RdsInstance","Status")
+                else:
+                    header = "%s\t%s" % (bold("RdsInstance"),bold("Status"))
+                print header
             for z in rds_instance_to_check:
                 checkRdsInstanceStatus(z,state)
             
             if debug:
                 print "[DEBUG] - len(rds_instances_to_check): %i" % (len(rds_instance_to_check))
             if len(rds_instance_to_check) == 0:
-                if nocolor:
-                    print "[%s] - All instances %s" % ("INFO",state)
-                else:
-                    print "[%s] - All instances %s" % (bold(yellow("INFO")),state)
+                if not quiet:
+                    if nocolor:
+                        print "[%s] - All instances %s" % ("INFO",state)
+                    else:
+                        print "[%s] - All instances %s" % (bold(yellow("INFO")),state)
                 break
             else:
-                if nocolor:
-                    print "[%s] - RDS Instances left to check: %i | Next check in %i seconds." % ("INFO",len(rds_instance_to_check),int(check_interval))
-                else:
-                    print "[%s] - RDS Instances left to check: %i | Next check in %i seconds." % (bold(yellow("INFO")),len(rds_instance_to_check),int(check_interval))
+                if not quiet:
+                    if nocolor:
+                        print "[%s] - RDS Instances left to check: %i | Next check in %i seconds." % ("INFO",len(rds_instance_to_check),int(check_interval))
+                    else:
+                        print "[%s] - RDS Instances left to check: %i | Next check in %i seconds." % (bold(yellow("INFO")),len(rds_instance_to_check),int(check_interval))
             time.sleep(check_interval)
 
     sys.exit(0)
