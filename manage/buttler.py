@@ -127,7 +127,7 @@ def stopInstance(instanceId):
         response = c.stop_instances(InstanceIds=[instanceId])
         if response['StoppingInstances'][0]['CurrentState']['Code'] != '16':
             instance_to_check.append(instanceId)
-            printLog("INFO","Se agrega la instancia %s a la lista de chequeos" % (instanceId))
+            printLog("STOP","Se agrega la instancia %s a la lista de chequeos." % (instanceId))
             return True
         else:
             return False
@@ -147,7 +147,7 @@ def startInstance(instanceId):
         response = c.start_instances(InstanceIds=[instanceId])
         if response['StartingInstances'][0]['CurrentState']['Code'] != '80':
             instance_to_check.append(instanceId)
-            printLog("INFO","Se agrega la instancia %s a la lista de chequeos" % (instanceId))
+            printLog("START","Se agrega la instancia %s a la lista de chequeos." % (instanceId))
             return True
         else:
             return False
@@ -167,7 +167,7 @@ def startRdsInstance(rdsInstanceId):
         response = c.start_db_instance(DBInstanceIdentifier=rdsInstanceId)
         if response['DBInstance']['DBInstanceStatus'] != "available":
             rds_instance_to_check.append(rdsInstanceId)
-            printLog("INFO","Se agrega la instancia RDS %s a la lista de chequeos" % (rdsInstanceId))
+            printLog("START","Se agrega la instancia RDS %s a la lista de chequeos." % (rdsInstanceId))
             return True
         else:
             return False
@@ -183,7 +183,7 @@ def stopRdsInstance(rdsInstanceId):
         response = c.stop_db_instance(DBInstanceIdentifier=rdsInstanceId)
         if response['DBInstance']['DBInstanceStatus'] != "stopped":
             rds_instance_to_check.append(rdsInstanceId)
-            printLog("INFO","Se agrega la instancia RDS %s a la lista de chequeos" % (rdsInstanceId))
+            printLog("STOP","Se agrega la instancia RDS %s a la lista de chequeos." % (rdsInstanceId))
             return True
         else: 
             return False
@@ -207,6 +207,7 @@ def checkInstanceStatus(instanceId,state):
             if code == state:
                 instance_to_check.remove(instance)
             if code == 48:
+                printLog("INFO","Instancia terminada abruptamente. Puede ser regla de Autoscaling.")
                 print "Ops: Instance Terminated. Autoscaling perhaps?"
                 instance_to_check.remove(instance)
     except Exception,e:
@@ -227,6 +228,7 @@ def checkRdsInstanceStatus(rdsInstanceId,state):
                 try: 
                     rds_instance_to_check.remove(db_instance)
                 except Exception,e:
+                    printLog("ERROR",str(e))
                     print "Ups: %s" % (e)
     except Exception,e:
         printLog("ERROR",e)
@@ -287,6 +289,7 @@ if __name__ == "__main__":
     
     # Seccion instancias EC2
     if not args.skip_ec2:
+        printLog("INFO","Recopilando informacion de instancias EC2")
         # Instancias EC2
         if not quiet:
             if nocolor:
@@ -301,6 +304,7 @@ if __name__ == "__main__":
                 response_i = client.describe_instances()
             # show status, no aplica --quiet
             if show_status:
+                printLog("INFO","%s\t\t%s" % ("InstanceID","Status"))
                 if nocolor:
                     print "%s\t\t%s" % ("InstanceID","Status")
                 else:
@@ -313,6 +317,7 @@ if __name__ == "__main__":
                     # Muestro el status de las instancias.
                     if show_status:
                         fmt = "{i:s}\t{s:s}"
+                        printLog("INFO",fmt.format(i=_instance,s=_state))
                         print fmt.format(i=_instance,s=_state)
 
                     for x in response_i['Reservations'][i]['Instances'][z]['Tags']:
@@ -478,7 +483,7 @@ if __name__ == "__main__":
                     print "ERROR - Environment %s not properly freed." % (bold(red(args.env)))
             sys.exit(1)
         else:
-            printLog("ERROR","Environment %s properly freed." % (args.env))
+            printLog("INFO","Environment %s properly freed." % (args.env))
             if not quiet:
                 if nocolor:
                     print "Environment %s properly freed." % (args.env)
